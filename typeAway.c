@@ -11,6 +11,15 @@
 /*** defining our own macros***/
 #define CTRL_KEY(key) ((key) & 0x1f) // ANDing with 31 i.e 1f in hexadecimal ex: 'a' - 97, 'a' & 0x1f - 1 
 #define ABUF_INIT {NULL, 0}
+enum keys { 
+    ARROW_LEFT = 1000, 
+    ARROW_RIGHT, ARROW_UP, 
+    ARROW_DOWN,
+    HOME_KEY,
+    END_KEY, 
+    PAGE_UP,
+    PAGE_DOWN
+};
 
 /*** global variables ***/
 struct configurations {
@@ -44,10 +53,10 @@ void indicateRows(struct abuf *ab) {
             if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
             int padding = (editor.terminalCols - welcomelen);
             if (padding) {
-                abAppend(ab, "~", 2);//3
+                abAppend(ab, "~", 3);//2
                 padding--;
             }
-            while (padding--) abAppend(ab, "~", 1);//2
+            while (padding--) abAppend(ab, "~", 2);//1
             abAppend(ab, welcome, welcomelen);
         }    
         else {
@@ -99,16 +108,12 @@ void enableRawMode() {
     struct termios raw = editor.originalTerminal;
     atexit(disableRawMode);
     if ( tcgetattr(STDIN_FILENO, &(editor.originalTerminal)) == -1) handleError("tcgetattr");
-    //turnOffFlags(raw);
-    raw.c_iflag &= ~(IXON | ICRNL | INPCK | BRKINT); //'~' complementing and then '&' ANDing the bits
-    raw.c_oflag &= ~(OPOST); //'~' complementing and then '&' ANDing the bits
-    raw.c_cflag |= ~(CS8); //ORing this time and not ANDing
-    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN); //'~' complementing and then '&' ANDing the bits
+    turnOffFlags(raw);
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 1;
     if ( tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1 ) handleError("tcsetattr");
 } // function to enable raw mode
-char readKey() {
+int readKey() {
     int nread;
     char c;
     while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
@@ -116,18 +121,43 @@ char readKey() {
     }
     if (c == '\x1b') { //arrow keys have the escape sequence '\x1b' at the beginning
         char seq[3];
+
         if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
         if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+        
         if (seq[0] == '[') {
+            if (seq[1] >= '0' && seq[1] <= '9') {
+                if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
+                if (seq[2] == '~') {
+                    switch (seq[1]) {
+                        case '1': return HOME_KEY;
+                        case '4': return END_KEY;
+                        case '5': return PAGE_UP;
+                        case '6': return PAGE_DOWN;
+                        case '7': return HOME_KEY;
+                        case '8': return END_KEY;
+                    }
+                }
+            } 
+            else {
+                switch (seq[1]) {
+                    case 'A': return ARROW_UP; 
+                    case 'B': return ARROW_DOWN;
+                    case 'C': return ARROW_RIGHT;
+                    case 'D': return ARROW_LEFT;
+                    case 'H': return HOME_KEY;
+                    case 'F': return END_KEY;
+                }
+            }
+        }
+        else if (seq[0] == 'O') {
             switch (seq[1]) {
-                case 'A': return 'w'; //mapping up arrow to be processed as w
-                case 'B': return 's'; //mapping down arrow to be processed as s
-                case 'C': return 'd'; //mapping right arrow to be processed as s
-                case 'D': return 'a'; //mapping left arrow to be processed as s
+                case 'H': return HOME_KEY;
+                case 'F': return END_KEY;
             }
         }
         return '\x1b';
-    } 
+    }
     else {
         return c;
     }
@@ -155,42 +185,61 @@ int getWindowSize(int *rSize, int *cSize) {
         return getCursorPosition(rSize, cSize); 
     }
     *rSize = ws.ws_col;
-    *cSize = ws.ws_row;
+    *cSize = ws.ws_row ;
     //disableRawMode();
     return 0;
 }
 
 /*** input ***/
-void editorMoveCursor(char key) {
+void moveCursor(int key) {
     switch (key) {
-        case 'a':
+        case ARROW_LEFT:
+            if (editor.xCoord != 0) 
             editor.xCoord --;
             break;
-        case 'd':
+        case ARROW_RIGHT:
+            if (editor.xCoord != editor.terminalCols * 4 - 1) 
             editor.xCoord ++;
             break;
-        case 'w':
+        case ARROW_UP:
+            if (editor.yCoord != 0) 
             editor.yCoord --;
             break;
-        case 's':
-            editor.yCoord++;
+        case ARROW_DOWN:
+            if (editor.yCoord != editor.terminalRows) 
+            editor.yCoord ++;
             break;
     }
 }
-void processKeypress() {
-    char c = readKey();
+void processKey() {
+    int c = readKey();
     switch (c) {
         case CTRL_KEY('q'):
             write(STDOUT_FILENO, "\x1b[2J", 4);
             write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
             break;
-        case 'w'://up
-        case 's'://down
-        case 'a'://left
-        case 'd'://right
-                editorMoveCursor(c);
-                break;
+        case HOME_KEY:
+            editor.xCoord = 0;
+            break;
+        case END_KEY:
+            editor.xCoord = editor.terminalCols * 4 - 1;
+            break;
+        
+        case PAGE_UP:
+        case PAGE_DOWN:
+            {
+                int times = editor.terminalRows;
+                while (times --)
+                moveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+            }
+            break;
+        case ARROW_UP:
+        case ARROW_DOWN:
+        case ARROW_LEFT:
+        case ARROW_RIGHT:
+            moveCursor(c);
+            break;
     }
 }
 
@@ -206,7 +255,7 @@ int main() {
     //enabling raw mode to process every character as they're entered
     //like entering a password
     while (1) {
-        processKeypress();
+        processKey();
         refreshScreen();
     }
     //tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTerminal);
