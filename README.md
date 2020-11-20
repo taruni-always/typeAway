@@ -1,2 +1,2 @@
 # typeAway
-typeAway our very own linux editor using C!
+typeAway, our very own text editor using C!
