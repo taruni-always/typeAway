@@ -1,0 +1,215 @@
+/*** Include statements***/
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>//unistd is the POSIC Operating System API
+#include <termios.h> //for terminal I/O interface
+#include <ctype.h> //for iscntrl() method
+#include <errno.h> //for handling errors
+#include <sys/ioctl.h> //to get terminal dimensions
+#include <string.h>
+
+/*** defining our own macros***/
+#define CTRL_KEY(key) ((key) & 0x1f) // ANDing with 31 i.e 1f in hexadecimal ex: 'a' - 97, 'a' & 0x1f - 1 
+#define ABUF_INIT {NULL, 0}
+
+/*** global variables ***/
+struct configurations {
+    int xCoord, yCoord;
+    int terminalRows, terminalCols;
+    struct termios originalTerminal;
+};
+struct configurations editor;
+
+/*** append buffer ***/
+struct abuf {
+    char *b;
+    int len;
+};
+void abAppend(struct abuf *ab, const char *s, int len) {
+    char *new = realloc(ab->b, ab->len + len);
+    if (new == NULL) return;
+    memcpy(&new[ab->len], s, len);
+    ab->b = new;
+    ab->len += len;
+}
+void abFree(struct abuf *ab) {
+    free(ab->b);
+}
+
+void indicateRows(struct abuf *ab) {
+    for (int row = 0; row < editor.terminalRows; row++) {
+        if (row == editor.terminalRows / 2) {
+            char welcome[80];
+            int welcomelen = snprintf(welcome, sizeof(welcome), "TypeAway!!");
+            if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
+            int padding = (editor.terminalCols - welcomelen);
+            if (padding) {
+                abAppend(ab, "~", 2);//3
+                padding--;
+            }
+            while (padding--) abAppend(ab, "~", 1);//2
+            abAppend(ab, welcome, welcomelen);
+        }    
+        else {
+            abAppend(ab, "~", 1);
+        }
+        abAppend(ab, "\x1b[K", 3);
+        if (row < editor.terminalCols - 1) {
+            abAppend(ab, "\r\n", 2);
+        }
+    }
+}
+void refreshScreen() {
+    struct abuf ab = ABUF_INIT;
+    
+    abAppend(&ab, "\x1b[?25l", 6);
+    //abAppend(&ab, "\x1b[2J", 4);
+    abAppend(&ab, "\x1b[H", 3);
+    
+    
+    indicateRows(&ab);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", editor.yCoord + 1, editor.xCoord + 1);
+    abAppend(&ab, buf, strlen(buf));
+
+    abAppend(&ab, "\x1b[?25h", 6);
+
+    write(STDOUT_FILENO, ab.b, ab.len);
+    abFree(&ab);
+}
+
+/*** Terminal ***/
+void handleError(const char *s) {
+    refreshScreen();
+    perror(s);
+    exit(1);
+}
+void turnOffFlags(struct termios raw) {
+    raw.c_iflag &= ~(IXON | ICRNL | INPCK | BRKINT); //'~' complementing and then '&' ANDing the bits
+    raw.c_oflag &= ~(OPOST); //'~' complementing and then '&' ANDing the bits
+    raw.c_cflag |= ~(CS8); //ORing this time and not ANDing
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN); //'~' complementing and then '&' ANDing the bits
+    //turning off a few needed flags
+}
+void disableRawMode() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &editor.originalTerminal);
+}
+void enableRawMode() {
+    struct termios raw = editor.originalTerminal;
+    atexit(disableRawMode);
+    if ( tcgetattr(STDIN_FILENO, &(editor.originalTerminal)) == -1) handleError("tcgetattr");
+    //turnOffFlags(raw);
+    raw.c_iflag &= ~(IXON | ICRNL | INPCK | BRKINT); //'~' complementing and then '&' ANDing the bits
+    raw.c_oflag &= ~(OPOST); //'~' complementing and then '&' ANDing the bits
+    raw.c_cflag |= ~(CS8); //ORing this time and not ANDing
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN); //'~' complementing and then '&' ANDing the bits
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
+    if ( tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1 ) handleError("tcsetattr");
+} // function to enable raw mode
+char readKey() {
+    int nread;
+    char c;
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+        if (nread == -1 && errno != EAGAIN) handleError("read");
+    }
+    if (c == '\x1b') { //arrow keys have the escape sequence '\x1b' at the beginning
+        char seq[3];
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+        if (seq[0] == '[') {
+            switch (seq[1]) {
+                case 'A': return 'w'; //mapping up arrow to be processed as w
+                case 'B': return 's'; //mapping down arrow to be processed as s
+                case 'C': return 'd'; //mapping right arrow to be processed as s
+                case 'D': return 'a'; //mapping left arrow to be processed as s
+            }
+        }
+        return '\x1b';
+    } 
+    else {
+        return c;
+    }
+} //separate function because we 're processing it only after we read a valid key w/o errors
+int getCursorPosition(int *rSize, int *cSize) {
+    char buffer[32];
+    unsigned int i = 0;
+    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+    
+    while (i < sizeof(buffer) - 1) {
+        if (read(STDIN_FILENO, &buffer[i], 1) != 1) break;
+        if (buffer[i] == 'R') break;
+        i ++;
+    }
+    buffer[i] = '\0';
+    if (buffer[0] != '\x1b' || buffer[1] != '[') return -1;
+    if (sscanf( &buffer[2], "%d;%d", rSize, cSize) != 2) return -1;
+    
+    return 0;
+}
+int getWindowSize(int *rSize, int *cSize) {
+    struct winsize ws;
+    if ( ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) { 
+        if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
+        return getCursorPosition(rSize, cSize); 
+    }
+    *rSize = ws.ws_col;
+    *cSize = ws.ws_row;
+    //disableRawMode();
+    return 0;
+}
+
+/*** input ***/
+void editorMoveCursor(char key) {
+    switch (key) {
+        case 'a':
+            editor.xCoord --;
+            break;
+        case 'd':
+            editor.xCoord ++;
+            break;
+        case 'w':
+            editor.yCoord --;
+            break;
+        case 's':
+            editor.yCoord++;
+            break;
+    }
+}
+void processKeypress() {
+    char c = readKey();
+    switch (c) {
+        case CTRL_KEY('q'):
+            write(STDOUT_FILENO, "\x1b[2J", 4);
+            write(STDOUT_FILENO, "\x1b[H", 3);
+            exit(0);
+            break;
+        case 'w'://up
+        case 's'://down
+        case 'a'://left
+        case 'd'://right
+                editorMoveCursor(c);
+                break;
+    }
+}
+
+/*** MAIN ***/
+void initEditor() {
+    editor.xCoord = 0;
+    editor.yCoord = 0;
+    if (getWindowSize(&editor.terminalRows, &editor.terminalCols) == -1) handleError(" getWindowSize");
+} // initializing all the fields of configurations
+int main() {
+    enableRawMode();
+    initEditor();
+    //enabling raw mode to process every character as they're entered
+    //like entering a password
+    while (1) {
+        processKeypress();
+        refreshScreen();
+    }
+    //tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTerminal);
+    //turning raw mode off once we're done
+    return 0;
+}
