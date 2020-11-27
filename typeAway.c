@@ -1,3 +1,7 @@
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 /*** Include statements***/
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,20 +15,30 @@
 /*** defining our own macros***/
 #define CTRL_KEY(key) ((key) & 0x1f) // ANDing with 31 i.e 1f in hexadecimal ex: 'a' - 97, 'a' & 0x1f - 1 
 #define ABUF_INIT {NULL, 0}
+
+
 enum keys { 
     ARROW_LEFT = 1000, 
     ARROW_RIGHT, ARROW_UP, 
     ARROW_DOWN,
+    DEL_KEY,
     HOME_KEY,
     END_KEY, 
     PAGE_UP,
     PAGE_DOWN
 };
 
+typedef struct editorRow {
+  int size;
+  char *chars;
+} editorRow;
+
 /*** global variables ***/
 struct configurations {
     int xCoord, yCoord;
     int terminalRows, terminalCols;
+    int numrows;
+    editorRow row;
     struct termios originalTerminal;
 };
 struct configurations editor;
@@ -47,20 +61,27 @@ void abFree(struct abuf *ab) {
 
 void indicateRows(struct abuf *ab) {
     for (int row = 0; row < editor.terminalRows; row++) {
-        if (row == editor.terminalRows / 2) {
-            char welcome[80];
-            int welcomelen = snprintf(welcome, sizeof(welcome), "TypeAway!!");
-            if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
-            int padding = (editor.terminalCols - welcomelen);
-            if (padding) {
-                abAppend(ab, "~", 3);//2
-                padding--;
+        if (row >= editor.numrows) {
+            if (editor.numrows == 0 && row == editor.terminalRows / 2) {
+                char welcome[80];
+                int welcomelen = snprintf(welcome, sizeof(welcome), "TypeAway!!");
+                if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
+                int padding = (editor.terminalCols - welcomelen);
+                if (padding) {
+                    abAppend(ab, "~", 1);//2
+                    padding--;
+                }
+                while (padding--) abAppend(ab, "~", 1);//1
+                abAppend(ab, welcome, welcomelen);
+            }    
+            else {
+                abAppend(ab, "~", 1);
             }
-            while (padding--) abAppend(ab, "~", 2);//1
-            abAppend(ab, welcome, welcomelen);
-        }    
+        } 
         else {
-            abAppend(ab, "~", 1);
+            int len = editor.row.size;
+            if (len > editor.terminalCols) len = editor.terminalCols;
+                abAppend(ab, editor.row.chars, len);
         }
         abAppend(ab, "\x1b[K", 3);
         if (row < editor.terminalCols - 1) {
@@ -131,6 +152,7 @@ int readKey() {
                 if (seq[2] == '~') {
                     switch (seq[1]) {
                         case '1': return HOME_KEY;
+                        case '3': return DEL_KEY;
                         case '4': return END_KEY;
                         case '5': return PAGE_UP;
                         case '6': return PAGE_DOWN;
@@ -185,9 +207,30 @@ int getWindowSize(int *rSize, int *cSize) {
         return getCursorPosition(rSize, cSize); 
     }
     *rSize = ws.ws_col;
-    *cSize = ws.ws_row ;
+    *cSize = ws.ws_row;
     //disableRawMode();
     return 0;
+}
+
+/*** file i/o ***/
+void editorOpen(char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) handleError("fopen");
+    char *line = NULL;
+    size_t lineCapacity = 0;
+    ssize_t linelen;
+    linelen = getline(&line, &lineCapacity, fp) ;
+    if (linelen != -1) {
+        while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
+            linelen--;
+        editor.row.size = linelen;
+        editor.row.chars = malloc(linelen + 1);
+        memcpy(editor.row.chars, line, linelen);
+        editor.row.chars[linelen] = '\0';
+        editor.numrows = 1;
+    }
+    free(line);
+    fclose(fp);
 }
 
 /*** input ***/
@@ -198,7 +241,7 @@ void moveCursor(int key) {
             editor.xCoord --;
             break;
         case ARROW_RIGHT:
-            if (editor.xCoord != editor.terminalCols * 4 - 1) 
+            if (editor.xCoord != editor.terminalCols - 1) 
             editor.xCoord ++;
             break;
         case ARROW_UP:
@@ -247,11 +290,14 @@ void processKey() {
 void initEditor() {
     editor.xCoord = 0;
     editor.yCoord = 0;
+    editor.numrows = 0;
     if (getWindowSize(&editor.terminalRows, &editor.terminalCols) == -1) handleError(" getWindowSize");
 } // initializing all the fields of configurations
-int main() {
+int main(int argc, char *argv[]) {
     enableRawMode();
     initEditor();
+    if ( argc >= 2) editorOpen(argv[1]);
+    //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
     while (1) {
