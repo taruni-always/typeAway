@@ -29,14 +29,15 @@ enum keys {
 };
 
 typedef struct editorRow {
-  int size;
+  int size, rsize;
   char *chars;
+  char *render;
 } editorRow;
 
 /*** global variables ***/
 struct configurations {
     int xCoord, yCoord;
-    int rowOffset;
+    int rowOffset, colOffset;
     int terminalRows, terminalCols;
     int numrows;
     editorRow *row;
@@ -60,6 +61,22 @@ void abFree(struct abuf *ab) {
     free(ab->b);
 }
 
+/***output screen***/
+void editorScroll() {
+    if (editor.yCoord < editor.rowOffset) {
+        editor.rowOffset = editor.yCoord;
+    }
+    if (editor.yCoord >= editor.rowOffset + editor.terminalRows) {
+        editor.rowOffset = editor.yCoord - editor.terminalRows + 1;
+    }
+    if (editor.xCoord < editor.colOffset) {
+        editor.colOffset = editor.xCoord;
+    }
+    if (editor.xCoord >= editor.colOffset + editor.terminalCols) {
+        editor.colOffset = editor.xCoord - editor.terminalCols + 1;
+    }
+}
+
 void indicateRows(struct abuf *ab) {
     for (int currRow = 0; currRow < editor.terminalRows; currRow ++) {
         int fileRow = currRow + editor.rowOffset;
@@ -81,9 +98,10 @@ void indicateRows(struct abuf *ab) {
             }
         } 
         else {
-            int len = editor.row[fileRow].size;
+            int len = editor.row[fileRow].size - editor.colOffset;
+            if (len < 0) len = 0;
             if (len > editor.terminalCols) len = editor.terminalCols;
-                abAppend(ab, editor.row[fileRow].chars, len);
+            abAppend(ab, &editor.row[fileRow].chars[editor.colOffset], len);
         }
         abAppend(ab, "\x1b[K", 3);
         if (currRow < editor.terminalRows - 1) {
@@ -92,17 +110,18 @@ void indicateRows(struct abuf *ab) {
     }
 }
 void refreshScreen() {
+    editorScroll();
+
     struct abuf ab = ABUF_INIT;
     
     abAppend(&ab, "\x1b[?25l", 6);
     //abAppend(&ab, "\x1b[2J", 4);
     abAppend(&ab, "\x1b[H", 3);
     
-    
     indicateRows(&ab);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", editor.yCoord + 1, editor.xCoord + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", editor.yCoord - editor.rowOffset + 1, editor.xCoord - editor.colOffset + 1);
     abAppend(&ab, buf, strlen(buf));
 
     abAppend(&ab, "\x1b[?25h", 6);
@@ -219,11 +238,16 @@ int getWindowSize(int *rSize, int *cSize) {
 
 void editorAppendRow(char *s, size_t len) {
     editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
+    
     int at = editor.numrows;
     editor.row[at].size = len;
     editor.row[at].chars = malloc(len + 1);
     memcpy(editor.row[at].chars, s, len);
     editor.row[at].chars[len] = '\0';
+
+    editor.row[at].rsize = 0;
+    editor.row[at].render = NULL;
+    
     editor.numrows ++;
 }
 
@@ -245,23 +269,38 @@ void editorOpen(char *filename) {
 
 /*** input ***/
 void moveCursor(int key) {
+    editorRow *row = (editor.yCoord >= editor.numrows) ? NULL : &editor.row[editor.yCoord];
+
     switch (key) {
         case ARROW_LEFT:
             if (editor.xCoord != 0) 
             editor.xCoord --;
+            else if (editor.yCoord > 0) {
+                editor.yCoord --;
+                editor.xCoord = editor.row[editor.yCoord].size;
+            }
             break;
         case ARROW_RIGHT:
-            if (editor.xCoord != editor.terminalCols - 1) 
+            if ( row && editor.xCoord < row -> size)
             editor.xCoord ++;
+            else if (row && editor.xCoord == row -> size) {
+                editor.yCoord ++;
+                editor.xCoord = 0;
+            }
             break;
         case ARROW_UP:
             if (editor.yCoord != 0) 
             editor.yCoord --;
             break;
         case ARROW_DOWN:
-            if (editor.yCoord != editor.terminalRows) 
+            if (editor.yCoord < editor.numrows) 
             editor.yCoord ++;
             break;
+    }
+    row = (editor.yCoord >= editor.numrows) ? NULL : &editor.row[editor.yCoord];
+    int rowlen = row ? row -> size : 0;
+    if (editor.xCoord > rowlen) {
+        editor.xCoord = rowlen;
     }
 }
 void processKey() {
@@ -276,7 +315,7 @@ void processKey() {
             editor.xCoord = 0;
             break;
         case END_KEY:
-            editor.xCoord = editor.terminalCols  - 1;
+            editor.xCoord = editor.row->size ;
             break;
         
         case PAGE_UP:
@@ -301,6 +340,7 @@ void initEditor() {
     editor.xCoord = 0;
     editor.yCoord = 0;
     editor.rowOffset = 0; //scrolling to top row by default
+    editor.colOffset = 0;
     editor.numrows = 0;
     editor.row = NULL;
     if (getWindowSize(&editor.terminalRows, &editor.terminalCols) == -1) handleError(" getWindowSize");
