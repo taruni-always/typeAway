@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
+#define TAB_STOP 8
 
 /*** Include statements***/
 #include <stdio.h>
@@ -11,6 +12,9 @@
 #include <errno.h> //for handling errors
 #include <sys/ioctl.h> //to get terminal dimensions
 #include <string.h>
+#include <time.h>
+#include <stdarg.h>
+
 
 /*** defining our own macros***/
 #define CTRL_KEY(key) ((key) & 0x1f) // ANDing with 31 i.e 1f in hexadecimal ex: 'a' - 97, 'a' & 0x1f - 1 
@@ -37,10 +41,14 @@ typedef struct editorRow {
 /*** global variables ***/
 struct configurations {
     int xCoord, yCoord;
+    int rx;
     int rowOffset, colOffset;
     int terminalRows, terminalCols;
     int numrows;
     editorRow *row;
+    char *filename;
+    char statusmsg[80];
+    time_t statusmsg_time;
     struct termios originalTerminal;
 };
 struct configurations editor;
@@ -62,18 +70,34 @@ void abFree(struct abuf *ab) {
 }
 
 /***output screen***/
+
+int xCoordTorx(editorRow *row, int cx) {
+    int rx = 0;
+    for (int j = 0; j < cx; j ++) {
+        if (row -> chars[j] == '\t')
+            rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+        rx ++;
+  }
+  return rx;
+}
+
 void editorScroll() {
+    editor.rx = 0;
+    if (editor.yCoord < editor.numrows) {
+        editor.rx = xCoordTorx(&editor.row[editor.yCoord], editor.xCoord);
+    }
+
     if (editor.yCoord < editor.rowOffset) {
         editor.rowOffset = editor.yCoord;
     }
     if (editor.yCoord >= editor.rowOffset + editor.terminalRows) {
         editor.rowOffset = editor.yCoord - editor.terminalRows + 1;
     }
-    if (editor.xCoord < editor.colOffset) {
-        editor.colOffset = editor.xCoord;
+    if (editor.rx < editor.colOffset) {
+        editor.colOffset = editor.rx;
     }
-    if (editor.xCoord >= editor.colOffset + editor.terminalCols) {
-        editor.colOffset = editor.xCoord - editor.terminalCols + 1;
+    if (editor.rx >= editor.colOffset + editor.terminalCols) {
+        editor.colOffset = editor.rx - editor.terminalCols + 1;
     }
 }
 
@@ -98,16 +122,48 @@ void indicateRows(struct abuf *ab) {
             }
         } 
         else {
-            int len = editor.row[fileRow].size - editor.colOffset;
+            int len = editor.row[fileRow].rsize - editor.colOffset;
             if (len < 0) len = 0;
             if (len > editor.terminalCols) len = editor.terminalCols;
-            abAppend(ab, &editor.row[fileRow].chars[editor.colOffset], len);
+            abAppend(ab, &editor.row[fileRow].render[editor.colOffset], len);
         }
         abAppend(ab, "\x1b[K", 3);
-        if (currRow < editor.terminalRows - 1) {
-            abAppend(ab, "\r\n", 2);
+        abAppend(ab, "\r\n", 2);
+    }
+}
+void drawStatusBar(struct abuf *ab) {
+    abAppend(ab, "\x1b[7m", 4);
+    //abAppend(ab, "\x1b[31;3m", 4);
+    char status[80], rstatus[80];
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines", editor.filename ? editor.filename : "[Unknown File]", editor.numrows);
+    if (len > editor.terminalCols) len = editor.terminalCols;
+        abAppend(ab, status, len);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", editor.yCoord + 1, editor.numrows);
+    while (len < editor.terminalCols) {
+        if (editor.terminalCols - len == rlen) {
+            abAppend(ab, rstatus, rlen);
+            break;
+        } 
+        else {
+            abAppend(ab, " ", 1);
+            len ++;
         }
     }
+    abAppend(ab, "\x1b[m", 3);
+    abAppend(ab, "\r\n", 2);
+}
+void setStatusMessage(const char *fmt, ...) {//variable number of arguements
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(editor.statusmsg, sizeof(editor.statusmsg), fmt, ap);
+    va_end(ap);
+    editor.statusmsg_time = time(NULL);
+}
+void drawMessageBar(struct abuf *ab) {
+    abAppend(ab, "\x1b[k", 3);
+    int msgLen = strlen(editor.statusmsg);
+    if ( msgLen > editor.terminalCols) msgLen = editor.terminalCols;
+    if ( msgLen && time(NULL) - editor.statusmsg_time < 5) abAppend(ab, editor.statusmsg, msgLen);
 }
 void refreshScreen() {
     editorScroll();
@@ -119,9 +175,11 @@ void refreshScreen() {
     abAppend(&ab, "\x1b[H", 3);
     
     indicateRows(&ab);
+    drawStatusBar(&ab);
+    drawMessageBar(&ab);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", editor.yCoord - editor.rowOffset + 1, editor.xCoord - editor.colOffset + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", editor.yCoord - editor.rowOffset + 1, editor.rx - editor.colOffset + 1);
     abAppend(&ab, buf, strlen(buf));
 
     abAppend(&ab, "\x1b[?25h", 6);
@@ -129,7 +187,6 @@ void refreshScreen() {
     write(STDOUT_FILENO, ab.b, ab.len);
     abFree(&ab);
 }
-
 /*** Terminal ***/
 void handleError(const char *s) {
     refreshScreen();
@@ -236,6 +293,29 @@ int getWindowSize(int *rSize, int *cSize) {
 
 /***manipulating row actions***/
 
+void editorUpdateRow(editorRow *row) {
+    free(row->render);
+    row->render = malloc(row->size + 1);
+    int index = 0, tabs = 0;
+    
+    for (int j = 0; j < row -> size; j ++) {
+        if (row -> chars[j] == '\t') tabs ++;
+    }
+
+    free(row -> render);
+    row -> render = malloc(row -> size + tabs * (TAB_STOP - 1) + 1);
+
+    for (int j = 0; j < row -> size; j ++) {
+        if (row->chars[j] == '\t') {
+            row->render[index ++] = ' ';
+            while (index % TAB_STOP != 0) row->render[index ++] = ' ';
+        } 
+        else row->render[index ++] = row-> chars[j];
+    }
+    row -> render[index] = '\0';
+    row -> rsize = index;
+}
+
 void editorAppendRow(char *s, size_t len) {
     editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
     
@@ -247,12 +327,14 @@ void editorAppendRow(char *s, size_t len) {
 
     editor.row[at].rsize = 0;
     editor.row[at].render = NULL;
-    
+    editorUpdateRow(&editor.row[at]);
     editor.numrows ++;
 }
 
 /*** file i/o ***/
 void editorOpen(char *filename) {
+    free(editor.filename);
+    editor.filename = strdup(filename);
     FILE *fp = fopen(filename, "r");
     if (!fp) handleError("fopen");
     char *line = NULL;
@@ -315,16 +397,20 @@ void processKey() {
             editor.xCoord = 0;
             break;
         case END_KEY:
-            editor.xCoord = editor.row->size ;
+        if (editor.yCoord < editor.numrows)
+            editor.xCoord = editor.row[editor.yCoord].size ;
             break;
         
         case PAGE_UP:
         case PAGE_DOWN:
-            {
-                int times = editor.terminalRows;
-                while (times --)
-                moveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
-            }
+            if (c == PAGE_UP)
+                editor.yCoord = editor.rowOffset;
+            else if (c == PAGE_DOWN)
+                editor.yCoord = editor.rowOffset + editor.terminalRows - 1;
+            if (editor.yCoord > editor.numrows) editor.yCoord = editor.numrows;
+            int times = editor.terminalRows;
+            while (times --)
+            moveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);        
             break;
         case ARROW_UP:
         case ARROW_DOWN:
@@ -337,13 +423,17 @@ void processKey() {
 
 /*** MAIN ***/
 void initEditor() {
-    editor.xCoord = 0;
-    editor.yCoord = 0;
-    editor.rowOffset = 0; //scrolling to top row by default
-    editor.colOffset = 0;
+    editor.xCoord = editor.yCoord = 0;
+    editor.rx = 0;
+    editor.rowOffset = editor.colOffset = 0;
     editor.numrows = 0;
     editor.row = NULL;
+    editor.filename = NULL;
+    editor.statusmsg[0] = '\0';
+    editor.statusmsg_time = 0;
+
     if (getWindowSize(&editor.terminalRows, &editor.terminalCols) == -1) handleError(" getWindowSize");
+    editor.terminalRows -= 2; // one for status bar and one for message
 } // initializing all the fields of configurations
 int main(int argc, char *argv[]) {
     enableRawMode();
@@ -352,6 +442,7 @@ int main(int argc, char *argv[]) {
     //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
+    setStatusMessage("[Press Ctr + Q to quit]");
     while (1) {
         processKey();
         refreshScreen();
