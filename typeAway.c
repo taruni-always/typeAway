@@ -36,9 +36,10 @@ typedef struct editorRow {
 /*** global variables ***/
 struct configurations {
     int xCoord, yCoord;
+    int rowOffset;
     int terminalRows, terminalCols;
     int numrows;
-    editorRow row;
+    editorRow *row;
     struct termios originalTerminal;
 };
 struct configurations editor;
@@ -60,18 +61,19 @@ void abFree(struct abuf *ab) {
 }
 
 void indicateRows(struct abuf *ab) {
-    for (int row = 0; row < editor.terminalRows; row++) {
-        if (row >= editor.numrows) {
-            if (editor.numrows == 0 && row == editor.terminalRows / 3) { //made it to by 3
+    for (int currRow = 0; currRow < editor.terminalRows; currRow ++) {
+        int fileRow = currRow + editor.rowOffset;
+        if (fileRow >= editor.numrows) {
+            if (editor.numrows == 0 && currRow == editor.terminalRows / 3) {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome), "TypeAway!!");
                 if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
-                int padding = (editor.terminalCols - welcomelen) / 2; //added by 2
+                int padding = (editor.terminalCols - welcomelen) / 2;
                 if (padding) {
                     abAppend(ab, "~", 1);
                     padding--;
                 }
-                while (padding--) abAppend(ab, " ", 1);//1 // changed ~ to space
+                while (padding--) abAppend(ab, " ", 1);
                 abAppend(ab, welcome, welcomelen);
             }    
             else {
@@ -79,12 +81,12 @@ void indicateRows(struct abuf *ab) {
             }
         } 
         else {
-            int len = editor.row.size;
+            int len = editor.row[fileRow].size;
             if (len > editor.terminalCols) len = editor.terminalCols;
-                abAppend(ab, editor.row.chars, len);
+                abAppend(ab, editor.row[fileRow].chars, len);
         }
         abAppend(ab, "\x1b[K", 3);
-        if (row < editor.terminalRows - 1) {
+        if (currRow < editor.terminalRows - 1) {
             abAppend(ab, "\r\n", 2);
         }
     }
@@ -207,10 +209,22 @@ int getWindowSize(int *rSize, int *cSize) {
         return getCursorPosition(rSize, cSize); 
     }
     else {
-        *cSize = ws.ws_col; // was cols = rows
-        *rSize = ws.ws_row; // was rows = cols
+        *cSize = ws.ws_col; 
+        *rSize = ws.ws_row; 
         return 0;
     }
+}
+
+/***manipulating row actions***/
+
+void editorAppendRow(char *s, size_t len) {
+    editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
+    int at = editor.numrows;
+    editor.row[at].size = len;
+    editor.row[at].chars = malloc(len + 1);
+    memcpy(editor.row[at].chars, s, len);
+    editor.row[at].chars[len] = '\0';
+    editor.numrows ++;
 }
 
 /*** file i/o ***/
@@ -220,15 +234,10 @@ void editorOpen(char *filename) {
     char *line = NULL;
     size_t lineCapacity = 0;
     ssize_t linelen;
-    linelen = getline(&line, &lineCapacity, fp) ;
-    if (linelen != -1) {
+    while ((linelen = getline(&line, &lineCapacity, fp)) != -1) {
         while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
             linelen--;
-        editor.row.size = linelen;
-        editor.row.chars = malloc(linelen + 1);
-        memcpy(editor.row.chars, line, linelen);
-        editor.row.chars[linelen] = '\0';
-        editor.numrows = 1;
+        editorAppendRow(line, linelen);
     }
     free(line);
     fclose(fp);
@@ -267,7 +276,7 @@ void processKey() {
             editor.xCoord = 0;
             break;
         case END_KEY:
-            editor.xCoord = editor.terminalCols  - 1; // changed it to normal
+            editor.xCoord = editor.terminalCols  - 1;
             break;
         
         case PAGE_UP:
@@ -291,7 +300,9 @@ void processKey() {
 void initEditor() {
     editor.xCoord = 0;
     editor.yCoord = 0;
+    editor.rowOffset = 0; //scrolling to top row by default
     editor.numrows = 0;
+    editor.row = NULL;
     if (getWindowSize(&editor.terminalRows, &editor.terminalCols) == -1) handleError(" getWindowSize");
 } // initializing all the fields of configurations
 int main(int argc, char *argv[]) {
