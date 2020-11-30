@@ -62,16 +62,16 @@ void abFree(struct abuf *ab) {
 void indicateRows(struct abuf *ab) {
     for (int row = 0; row < editor.terminalRows; row++) {
         if (row >= editor.numrows) {
-            if (editor.numrows == 0 && row == editor.terminalRows / 2) {
+            if (editor.numrows == 0 && row == editor.terminalRows / 3) { //made it to by 3
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome), "TypeAway!!");
                 if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
-                int padding = (editor.terminalCols - welcomelen);
+                int padding = (editor.terminalCols - welcomelen) / 2; //added by 2
                 if (padding) {
-                    abAppend(ab, "~", 1);//2
+                    abAppend(ab, "~", 1);
                     padding--;
                 }
-                while (padding--) abAppend(ab, "~", 1);//1
+                while (padding--) abAppend(ab, " ", 1);//1 // changed ~ to space
                 abAppend(ab, welcome, welcomelen);
             }    
             else {
@@ -84,7 +84,7 @@ void indicateRows(struct abuf *ab) {
                 abAppend(ab, editor.row.chars, len);
         }
         abAppend(ab, "\x1b[K", 3);
-        if (row < editor.terminalCols - 1) {
+        if (row < editor.terminalRows - 1) {
             abAppend(ab, "\r\n", 2);
         }
     }
@@ -206,10 +206,11 @@ int getWindowSize(int *rSize, int *cSize) {
         if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
         return getCursorPosition(rSize, cSize); 
     }
-    *rSize = ws.ws_col;
-    *cSize = ws.ws_row;
-    //disableRawMode();
-    return 0;
+    else {
+        *cSize = ws.ws_col; // was cols = rows
+        *rSize = ws.ws_row; // was rows = cols
+        return 0;
+    }
 }
 
 /*** file i/o ***/
@@ -266,7 +267,7 @@ void processKey() {
             editor.xCoord = 0;
             break;
         case END_KEY:
-            editor.xCoord = editor.terminalCols * 4 - 1;
+            editor.xCoord = editor.terminalCols  - 1; // changed it to normal
             break;
         
         case PAGE_UP:
