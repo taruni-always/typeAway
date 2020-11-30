@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdarg.h>
+#include <fcntl.h>
 
 
 /*** defining our own macros***/
@@ -188,6 +189,7 @@ void refreshScreen() {
     write(STDOUT_FILENO, ab.b, ab.len);
     abFree(&ab);
 }
+
 /*** Terminal ***/
 void handleError(const char *s) {
     refreshScreen();
@@ -293,7 +295,6 @@ int getWindowSize(int *rSize, int *cSize) {
 }
 
 /***manipulating row actions***/
-
 void updateRow(editorRow *row) {
     free(row->render);
     row->render = malloc(row->size + 1);
@@ -316,7 +317,6 @@ void updateRow(editorRow *row) {
     row -> render[index] = '\0';
     row -> rsize = index;
 }
-
 void appendRow(char *s, size_t len) {
     editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
     
@@ -366,6 +366,40 @@ void editorOpen(char *filename) {
     free(line);
     fclose(fp);
 }
+char *rowsToString(int *bufferLen) {
+    int totalLen = 0;
+    for (int j = 0; j < editor.numrows; j ++)
+        totalLen += editor.row[j].size + 1;
+        *bufferLen = totalLen;
+    char *buf = malloc(totalLen);
+    char *p = buf;
+    for (int j = 0; j < editor.numrows; j++) {
+        memcpy(p, editor.row[j].chars, editor.row[j].size);
+        p += editor.row[j].size;
+        *p = '\n';
+        p++;
+    }
+    return buf;
+}
+void editorSave() {
+    if (editor.filename == NULL) return;
+    int len;
+    char *buf = rowsToString(&len);
+    int fd = open(editor.filename, O_RDWR | O_CREAT, 0644);
+    if (fd != -1) {
+    if (ftruncate(fd, len) != -1) {
+        if (write(fd, buf, len) == len) {
+            close(fd);
+            free(buf);
+            setStatusMessage("%d bytes written to disk", len);
+            return;
+        }
+    }
+    close(fd);
+    }
+    free(buf);
+    setStatusMessage("Can't save! I/O error: %s", strerror(errno));
+}
 
 /*** input ***/
 void moveCursor(int key) {
@@ -413,6 +447,9 @@ void processKey() {
             write(STDOUT_FILENO, "\x1b[2J", 4);
             write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
+            break;
+        case CTRL_KEY('s'):
+            editorSave();
             break;
         case HOME_KEY:
             editor.xCoord = 0;
@@ -474,7 +511,7 @@ int main(int argc, char *argv[]) {
     //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
-    setStatusMessage("[Press Ctr + Q to quit]");
+    setStatusMessage("[Ctrl+Q=quit | Ctrl+S=save]");
     while (1) {
         processKey();
         refreshScreen();
