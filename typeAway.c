@@ -22,6 +22,7 @@
 
 
 enum keys { 
+    BACK_SPACE = 127,
     ARROW_LEFT = 1000, 
     ARROW_RIGHT, ARROW_UP, 
     ARROW_DOWN,
@@ -293,7 +294,7 @@ int getWindowSize(int *rSize, int *cSize) {
 
 /***manipulating row actions***/
 
-void editorUpdateRow(editorRow *row) {
+void updateRow(editorRow *row) {
     free(row->render);
     row->render = malloc(row->size + 1);
     int index = 0, tabs = 0;
@@ -316,7 +317,7 @@ void editorUpdateRow(editorRow *row) {
     row -> rsize = index;
 }
 
-void editorAppendRow(char *s, size_t len) {
+void appendRow(char *s, size_t len) {
     editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
     
     int at = editor.numrows;
@@ -327,9 +328,26 @@ void editorAppendRow(char *s, size_t len) {
 
     editor.row[at].rsize = 0;
     editor.row[at].render = NULL;
-    editorUpdateRow(&editor.row[at]);
+    updateRow(&editor.row[at]);
     editor.numrows ++;
 }
+void rowInsertChar(editorRow *row, int insertAt, int c) {
+    if (insertAt < 0 || insertAt > row->size) insertAt = row->size;
+    row -> chars = realloc(row->chars, row->size + 2);
+    memmove(&row -> chars[insertAt + 1], &row -> chars[insertAt], row -> size - insertAt + 1);
+    row->size++;
+    row->chars[insertAt] = c;
+    updateRow(row);
+}
+
+/*** editor operations ***/
+void editorInsertChar(int c) {
+    if (editor.yCoord == editor.numrows)
+        appendRow("", 0);
+    rowInsertChar(&editor.row[editor.yCoord], editor.xCoord, c);
+    editor.xCoord ++;
+}
+
 
 /*** file i/o ***/
 void editorOpen(char *filename) {
@@ -343,7 +361,7 @@ void editorOpen(char *filename) {
     while ((linelen = getline(&line, &lineCapacity, fp)) != -1) {
         while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
             linelen--;
-        editorAppendRow(line, linelen);
+        appendRow(line, linelen);
     }
     free(line);
     fclose(fp);
@@ -388,6 +406,9 @@ void moveCursor(int key) {
 void processKey() {
     int c = readKey();
     switch (c) {
+        case '\r': 
+            
+            break;
         case CTRL_KEY('q'):
             write(STDOUT_FILENO, "\x1b[2J", 4);
             write(STDOUT_FILENO, "\x1b[H", 3);
@@ -397,6 +418,11 @@ void processKey() {
             editor.xCoord = 0;
             break;
         case END_KEY:
+        case BACK_SPACE:
+        case CTRL_KEY('h'):
+        case DEL_KEY:
+
+                break;
         if (editor.yCoord < editor.numrows)
             editor.xCoord = editor.row[editor.yCoord].size ;
             break;
@@ -417,6 +443,12 @@ void processKey() {
         case ARROW_LEFT:
         case ARROW_RIGHT:
             moveCursor(c);
+            break;
+        case CTRL_KEY('l'):
+
+            break;
+        default :
+            editorInsertChar(c);
             break;
     }
 }
