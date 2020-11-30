@@ -48,6 +48,7 @@ struct configurations {
     int terminalRows, terminalCols;
     int numrows;
     editorRow *row;
+    int dirty;// to know if the changes are saved or not
     char *filename;
     char statusmsg[80];
     time_t statusmsg_time;
@@ -137,7 +138,9 @@ void drawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4);
     //abAppend(ab, "\x1b[31;3m", 4);
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines", editor.filename ? editor.filename : "[Unknown File]", editor.numrows);
+    int len = snprintf(status, sizeof(status), "%.25s - %d lines %s", 
+    editor.filename ? editor.filename : "[Unknown File]", editor.numrows, 
+    editor.dirty ? "(modified)" : "");
     if (len > editor.terminalCols) len = editor.terminalCols;
         abAppend(ab, status, len);
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", editor.yCoord + 1, editor.numrows);
@@ -330,6 +333,7 @@ void appendRow(char *s, size_t len) {
     editor.row[at].render = NULL;
     updateRow(&editor.row[at]);
     editor.numrows ++;
+    editor.dirty ++;
 }
 void rowInsertChar(editorRow *row, int insertAt, int c) {
     if (insertAt < 0 || insertAt > row->size) insertAt = row->size;
@@ -338,6 +342,7 @@ void rowInsertChar(editorRow *row, int insertAt, int c) {
     row->size++;
     row->chars[insertAt] = c;
     updateRow(row);
+    editor.dirty ++;
 }
 
 /*** editor operations ***/
@@ -365,6 +370,7 @@ void editorOpen(char *filename) {
     }
     free(line);
     fclose(fp);
+    editor.dirty = 0;
 }
 char *rowsToString(int *bufferLen) {
     int totalLen = 0;
@@ -391,6 +397,7 @@ void editorSave() {
         if (write(fd, buf, len) == len) {
             close(fd);
             free(buf);
+            editor.dirty = 0;
             setStatusMessage("%d bytes written to disk", len);
             return;
         }
@@ -438,12 +445,18 @@ void moveCursor(int key) {
     }
 }
 void processKey() {
+    static int quit_times = 1;
     int c = readKey();
     switch (c) {
         case '\r': 
             
             break;
         case CTRL_KEY('q'):
+        if (editor.dirty && quit_times) {
+            setStatusMessage("WARNING!! This file contains unsaved changes. Press Ctrl+Q again in in order to exit,");
+            quit_times --;
+            return;
+        }
             write(STDOUT_FILENO, "\x1b[2J", 4);
             write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
@@ -488,6 +501,7 @@ void processKey() {
             editorInsertChar(c);
             break;
     }
+    quit_times = 1;
 }
 
 /*** MAIN ***/
@@ -496,6 +510,7 @@ void initEditor() {
     editor.rx = 0;
     editor.rowOffset = editor.colOffset = 0;
     editor.numrows = 0;
+    editor.dirty = 0;
     editor.row = NULL;
     editor.filename = NULL;
     editor.statusmsg[0] = '\0';
@@ -511,7 +526,7 @@ int main(int argc, char *argv[]) {
     //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
-    setStatusMessage("[Ctrl+Q=quit | Ctrl+S=save]");
+    setStatusMessage("[Ctrl+Q=quit|Ctrl+S=save]");
     while (1) {
         processKey();
         refreshScreen();
