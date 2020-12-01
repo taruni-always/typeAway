@@ -380,6 +380,21 @@ void editorInsertChar(int c) {
     rowInsertChar(&editor.row[editor.yCoord], editor.xCoord, c);
     editor.xCoord ++;
 }
+void editorInsertNewline() {
+    if (editor.xCoord == 0) {
+        insertRow(editor.yCoord, "", 0);
+    } 
+    else {
+        editorRow * row = &editor.row[editor.yCoord];
+        insertRow(editor.yCoord + 1, &row -> chars[editor.xCoord], row -> size - editor.xCoord);
+        row = &editor.row[editor.yCoord];
+        row -> size = editor.xCoord;
+        row -> chars[row -> size] = '\0';
+        updateRow(row);
+    }
+    editor.yCoord ++;
+    editor.xCoord = 0;
+}
 void editorDelChar() {
     if (editor.yCoord == editor.numrows) return;
     if (editor.xCoord == 0 && editor.yCoord == 0) return;
@@ -493,7 +508,7 @@ void processKey() {
 
     switch (c) {
         case '\r': 
-            
+            editorInsertNewline();
             break;
         case CTRL_KEY('q'):
         if (editor.dirty && quit_times) {
