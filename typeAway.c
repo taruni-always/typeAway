@@ -86,7 +86,7 @@ void editorSetStatusMessage(const char *fmt, ...);
 char *prompt(char *message);
 
 /***output screen***/
-
+ 
 void editorScroll() {
     editor.rx = 0;
     if (editor.yCoord < editor.numrows) {
@@ -167,6 +167,7 @@ void setStatusMessage(const char *fmt, ...) {//variable number of arguements
 }
 void drawMessageBar(struct abuf *ab) {
     abAppend(ab, "\x1b[K", 3);
+    //abAppend(ab, "\x1b[m", 3);
     int msgLen = strlen(editor.statusmsg);
     if ( msgLen > editor.terminalCols) msgLen = editor.terminalCols;
     if ( msgLen && time(NULL) - editor.statusmsg_time < 5) abAppend(ab, editor.statusmsg, msgLen);
@@ -494,7 +495,7 @@ char *prompt(char *message) {
         int c = readKey();
         if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACK_SPACE) {
             if (bufferLen != 0) buffer[-- bufferLen] = '\0';
-        }
+        } 
         else if (c == '\x1b') {
             setStatusMessage("");
             free(buffer);
@@ -505,14 +506,14 @@ char *prompt(char *message) {
                 setStatusMessage("");
                 return buffer;
             }
-            else if (!iscntrl(c) && c < 128) {
-                if ( bufferLen == bufferSize - 1) {
-                    bufferSize *= 2;
-                    buffer = realloc(buffer, bufferSize);
-                }
-                buffer[bufferLen ++] = c;
-                buffer[bufferLen] = '\0';
+        }
+        else if (!iscntrl(c) && c < 128) {
+            if ( bufferLen == bufferSize - 1) {
+                bufferSize *= 2;
+                buffer = realloc(buffer, bufferSize);
             }
+            buffer[bufferLen ++] = c;
+            buffer[bufferLen] = '\0';
         }
     }
 }
@@ -586,9 +587,6 @@ void processKey() {
             if ( c == DEL_KEY) moveCursor(ARROW_RIGHT);
             editorDelChar();
             break;
-        /*if (editor.yCoord < editor.numrows)
-            editor.xCoord = editor.row[editor.yCoord].size ;
-            break;*/
         
         case PAGE_UP:
         case PAGE_DOWN:
@@ -639,7 +637,7 @@ int main(int argc, char *argv[]) {
     //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
-    setStatusMessage("[Ctrl+Q=quit|Ctrl+S=save]");
+    setStatusMessage("[Ctrl+Q = quit | Ctrl+S = save]");
     while (1) {
         refreshScreen();
         processKey();
