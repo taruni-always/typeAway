@@ -320,19 +320,32 @@ void updateRow(editorRow *row) {
     row -> render[index] = '\0';
     row -> rsize = index;
 }
-void appendRow(char *s, size_t len) {
-    editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
+void insertRow(int insertAt, char *s, size_t len) {
+    if ( insertAt < 0 || insertAt > editor.numrows) return; 
     
-    int at = editor.numrows;
-    editor.row[at].size = len;
-    editor.row[at].chars = malloc(len + 1);
-    memcpy(editor.row[at].chars, s, len);
-    editor.row[at].chars[len] = '\0';
+    editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
+    memmove(&editor.row[insertAt + 1], &editor.row[insertAt], sizeof(editorRow) * (editor.numrows - insertAt));
+        
+    editor.row[insertAt].size = len;
+    editor.row[insertAt].chars = malloc(len + 1);
+    memcpy(editor.row[insertAt].chars, s, len);
+    editor.row[insertAt].chars[len] = '\0';
 
-    editor.row[at].rsize = 0;
-    editor.row[at].render = NULL;
-    updateRow(&editor.row[at]);
+    editor.row[insertAt].rsize = 0;
+    editor.row[insertAt].render = NULL;
+    updateRow(&editor.row[insertAt]);
     editor.numrows ++;
+    editor.dirty ++;
+}
+void freeRow(editorRow *row) {
+    free(row -> render);
+    free(row -> chars);
+}
+void delRow(int at) {
+    if (at < 0 || at >= editor.numrows) return;
+    freeRow(&editor.row[at]);
+    memmove(&editor.row[at], &editor.row[at + 1], sizeof(editorRow) * (editor.numrows - at - 1));
+    editor.numrows --;
     editor.dirty ++;
 }
 void rowInsertChar(editorRow *row, int insertAt, int c) {
@@ -344,15 +357,45 @@ void rowInsertChar(editorRow *row, int insertAt, int c) {
     updateRow(row);
     editor.dirty ++;
 }
+void rowAppendString(editorRow *row, char *s, size_t len) {
+    row -> chars= realloc(row -> chars, row -> size + len + 1);
+    memcpy(&row -> chars[row -> size], s, len);
+    row -> size += len;
+    row -> chars[row -> size] = '\0';
+    updateRow(row);
+    editor.dirty ++;
+}
+void rowDelChar(editorRow *row, int at) {
+    if (at < 0 || at >= row->size) return;
+    memmove(& row -> chars[at], &row -> chars[at + 1], row -> size - at);
+    row->size --;
+    updateRow(row);
+    editor.dirty ++;
+}
 
 /*** editor operations ***/
 void editorInsertChar(int c) {
     if (editor.yCoord == editor.numrows)
-        appendRow("", 0);
+        insertRow(editor.numrows, "", 0);
     rowInsertChar(&editor.row[editor.yCoord], editor.xCoord, c);
     editor.xCoord ++;
 }
+void editorDelChar() {
+    if (editor.yCoord == editor.numrows) return;
+    if (editor.xCoord == 0 && editor.yCoord == 0) return;
 
+    editorRow * row = &editor.row[editor.yCoord];
+    if (editor.xCoord > 0) {
+        rowDelChar(row, editor.xCoord - 1);
+        editor.xCoord --;
+    }
+    else {
+        editor.xCoord = editor.row[editor.yCoord - 1].size;
+        rowAppendString(&editor.row[editor.yCoord - 1], row -> chars, row -> size);
+        delRow(editor.yCoord);
+        editor.yCoord --;
+    }
+}
 
 /*** file i/o ***/
 void editorOpen(char *filename) {
@@ -366,7 +409,7 @@ void editorOpen(char *filename) {
     while ((linelen = getline(&line, &lineCapacity, fp)) != -1) {
         while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
             linelen--;
-        appendRow(line, linelen);
+        insertRow(editor.numrows, line, linelen);
     }
     free(line);
     fclose(fp);
@@ -447,6 +490,7 @@ void moveCursor(int key) {
 void processKey() {
     static int quit_times = 1;
     int c = readKey();
+
     switch (c) {
         case '\r': 
             
@@ -468,14 +512,18 @@ void processKey() {
             editor.xCoord = 0;
             break;
         case END_KEY:
+            if (editor.yCoord < editor.numrows)
+                editor.xCoord = editor.row[editor.yCoord].size;
+            break;
         case BACK_SPACE:
         case CTRL_KEY('h'):
         case DEL_KEY:
-
-                break;
-        if (editor.yCoord < editor.numrows)
-            editor.xCoord = editor.row[editor.yCoord].size ;
+            if ( c == DEL_KEY) moveCursor(ARROW_RIGHT);
+                editorDelChar();
             break;
+        /*if (editor.yCoord < editor.numrows)
+            editor.xCoord = editor.row[editor.yCoord].size ;
+            break;*/
         
         case PAGE_UP:
         case PAGE_DOWN:
@@ -495,7 +543,7 @@ void processKey() {
             moveCursor(c);
             break;
         case CTRL_KEY('l'):
-
+        case '\x1b':
             break;
         default :
             editorInsertChar(c);
