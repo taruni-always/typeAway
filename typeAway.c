@@ -124,18 +124,18 @@ void indicateRows(struct abuf *ab) {
         if (fileRow >= editor.numrows) {
             if (editor.numrows == 0 && currRow == editor.terminalRows / 3) {
                 char welcome[80];
-                int welcomelen = snprintf(welcome, sizeof(welcome), "TypeAway!!");
+                int welcomelen = snprintf(welcome, sizeof(welcome), "\x1b[33m T\x1b[35my\x1b[33mP\x1b[35me Away!!\x1b[m");
                 if (welcomelen > editor.terminalCols) welcomelen = editor.terminalCols;
                 int padding = (editor.terminalCols - welcomelen) / 2;
                 if (padding) {
-                    abAppend(ab, "~", 1);
+                    abAppend(ab, "~", 1);//cyan
                     padding--;
                 }
                 while (padding--) abAppend(ab, " ", 1);
                 abAppend(ab, welcome, welcomelen);
             }    
             else {
-                abAppend(ab, "~", 1);
+                abAppend(ab, "~", 1);//light blue
             }
         } 
         else {
@@ -150,9 +150,8 @@ void indicateRows(struct abuf *ab) {
 }
 void drawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4);
-    //abAppend(ab, "\x1b[31;3m", 4);
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s", editor.filename ? editor.filename : "[Unknown File]", editor.numrows, editor.dirty ? "(modified)" : "");
+    int len = snprintf(status, sizeof(status), "\x1b[35m %.20s - %d lines %s\x1b[m", editor.filename ? editor.filename : "[Unknown File]", editor.numrows, editor.dirty ? "(modified)" : "");
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", editor.yCoord + 1, editor.numrows);
     if (len > editor.terminalCols) len = editor.terminalCols;
     abAppend(ab, status, len);
@@ -169,8 +168,9 @@ void drawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[m", 3);
     abAppend(ab, "\r\n", 2);
 }
-void setStatusMessage(const char *fmt, ...) {//variable number of arguements
+void setStatusMessage( const char *fmt, ...) {//variable number of arguements
     va_list ap;
+    //strcat(fmt, "\x1b[32m");
     va_start(ap, fmt);
     vsnprintf(editor.statusmsg, sizeof(editor.statusmsg), fmt, ap);
     va_end(ap);
@@ -464,9 +464,9 @@ char *rowsToString(int *bufferLen) {
 }
 void editorSave() {
     if (editor.filename == NULL) {
-        editor.filename = prompt("Save as: %s (ESC to cancel)", NULL);
+        editor.filename = prompt("\x1b[34mSave as: %s (ESC to cancel)", NULL);
         if (editor.filename == NULL) {
-            setStatusMessage("Save aborted");
+            setStatusMessage("\x1b[36m Save aborted\x1b[m");
             return;
         }
     }
@@ -481,19 +481,19 @@ void editorSave() {
                 close(fd);
                 free(buf);
                 editor.dirty = 0;
-                setStatusMessage("%d bytes written to disk", len);
+                setStatusMessage("\x1b[32m %d bytes written to disk\x1b[m", len);
                 return;
             }
         }
         close(fd);
     }
     free(buf);
-    setStatusMessage("Can't save! I/O error: %s", strerror(errno));
+    setStatusMessage("\x1b[31m Can't save! I/O error: %s\x1b[m", strerror(errno));
 }
 
 /**Find**/
 
-void editorFindCallback(char *sequence, int key) {
+void editorFindCallback(char *sequence, int key) { //for incremental search
     if ( key == '\r' || key == '\x1b') return;
 
     for ( int i = 0; i < editor.numrows; i++) {
@@ -508,7 +508,7 @@ void editorFindCallback(char *sequence, int key) {
     }
 }
 void editorFind() {
-    char *sequence = prompt("Search: %s (ESC to cancel)", editorFindCallback);
+    char *sequence = prompt("\x1b[32mSearch: %s (ESC to cancel)\x1b[m", editorFindCallback);
     if (sequence) free(sequence);
 }
 
@@ -598,7 +598,7 @@ void processKey() {
             break;
         case CTRL_KEY('q'):
         if (editor.dirty && quit_times) {
-            setStatusMessage("WARNING!! This file contains unsaved changes. Press Ctrl+Q again to exit");
+            setStatusMessage("\x1b[31m WARNING!! This file contains unsaved changes. Press Ctrl+Q again to exit\x1b[m");
             quit_times --;
             return;
         }
@@ -675,7 +675,7 @@ int main(int argc, char *argv[]) {
     //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
-    setStatusMessage("[Ctrl+Q = quit | Ctrl+S = save | Ctrl+F = find]");
+    setStatusMessage("\x1b[34m [Ctrl+Q = quit | Ctrl+S = save | Ctrl+F = find]\x1b[m");
     while (1) {
         refreshScreen();
         processKey();
