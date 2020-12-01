@@ -62,18 +62,17 @@ struct abuf {
     int len;
 };
 void abAppend(struct abuf *ab, const char *s, int len) {
-    char *new = realloc(ab->b, ab->len + len);
+    char *new = realloc(ab -> b, ab -> len + len);
     if (new == NULL) return;
-    memcpy(&new[ab->len], s, len);
-    ab->b = new;
-    ab->len += len;
+    memcpy(&new[ab -> len], s, len);
+    ab -> b = new;
+    ab -> len += len;
 }
 void abFree(struct abuf *ab) {
-    free(ab->b);
+    free(ab -> b);
 }
 
-/***output screen***/
-
+/***prototypes***/
 int xCoordTorx(editorRow *row, int cx) {
     int rx = 0;
     for (int j = 0; j < cx; j ++) {
@@ -83,6 +82,10 @@ int xCoordTorx(editorRow *row, int cx) {
   }
   return rx;
 }
+void editorSetStatusMessage(const char *fmt, ...);
+char *prompt(char *message);
+
+/***output screen***/
 
 void editorScroll() {
     editor.rx = 0;
@@ -138,12 +141,10 @@ void drawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4);
     //abAppend(ab, "\x1b[31;3m", 4);
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.25s - %d lines %s", 
-    editor.filename ? editor.filename : "[Unknown File]", editor.numrows, 
-    editor.dirty ? "(modified)" : "");
-    if (len > editor.terminalCols) len = editor.terminalCols;
-        abAppend(ab, status, len);
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s", editor.filename ? editor.filename : "[Unknown File]", editor.numrows, editor.dirty ? "(modified)" : "");
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", editor.yCoord + 1, editor.numrows);
+    if (len > editor.terminalCols) len = editor.terminalCols;
+    abAppend(ab, status, len);
     while (len < editor.terminalCols) {
         if (editor.terminalCols - len == rlen) {
             abAppend(ab, rstatus, rlen);
@@ -165,7 +166,7 @@ void setStatusMessage(const char *fmt, ...) {//variable number of arguements
     editor.statusmsg_time = time(NULL);
 }
 void drawMessageBar(struct abuf *ab) {
-    abAppend(ab, "\x1b[k", 3);
+    abAppend(ab, "\x1b[K", 3);
     int msgLen = strlen(editor.statusmsg);
     if ( msgLen > editor.terminalCols) msgLen = editor.terminalCols;
     if ( msgLen && time(NULL) - editor.statusmsg_time < 5) abAppend(ab, editor.statusmsg, msgLen);
@@ -175,7 +176,7 @@ void refreshScreen() {
 
     struct abuf ab = ABUF_INIT;
     
-    abAppend(&ab, "\x1b[?25l", 6);
+    abAppend(&ab, "\x1b[?25l", 6); // hide cursor
     //abAppend(&ab, "\x1b[2J", 4);
     abAppend(&ab, "\x1b[H", 3);
     
@@ -187,11 +188,12 @@ void refreshScreen() {
     snprintf(buf, sizeof(buf), "\x1b[%d;%dH", editor.yCoord - editor.rowOffset + 1, editor.rx - editor.colOffset + 1);
     abAppend(&ab, buf, strlen(buf));
 
-    abAppend(&ab, "\x1b[?25h", 6);
+    abAppend(&ab, "\x1b[?25h", 6); // show cursor
 
     write(STDOUT_FILENO, ab.b, ab.len);
     abFree(&ab);
 }
+
 
 /*** Terminal ***/
 void handleError(const char *s) {
@@ -349,16 +351,16 @@ void delRow(int at) {
     editor.dirty ++;
 }
 void rowInsertChar(editorRow *row, int insertAt, int c) {
-    if (insertAt < 0 || insertAt > row->size) insertAt = row->size;
-    row -> chars = realloc(row->chars, row->size + 2);
+    if (insertAt < 0 || insertAt > row -> size) insertAt = row -> size;
+    row -> chars = realloc(row -> chars, row -> size + 2);
     memmove(&row -> chars[insertAt + 1], &row -> chars[insertAt], row -> size - insertAt + 1);
-    row->size++;
-    row->chars[insertAt] = c;
+    row -> size++;
+    row -> chars[insertAt] = c;
     updateRow(row);
     editor.dirty ++;
 }
 void rowAppendString(editorRow *row, char *s, size_t len) {
-    row -> chars= realloc(row -> chars, row -> size + len + 1);
+    row -> chars = realloc(row -> chars, row -> size + len + 1);
     memcpy(&row -> chars[row -> size], s, len);
     row -> size += len;
     row -> chars[row -> size] = '\0';
@@ -368,7 +370,7 @@ void rowAppendString(editorRow *row, char *s, size_t len) {
 void rowDelChar(editorRow *row, int at) {
     if (at < 0 || at >= row->size) return;
     memmove(& row -> chars[at], &row -> chars[at + 1], row -> size - at);
-    row->size --;
+    row -> size --;
     updateRow(row);
     editor.dirty ++;
 }
@@ -416,8 +418,10 @@ void editorDelChar() {
 void editorOpen(char *filename) {
     free(editor.filename);
     editor.filename = strdup(filename);
+    
     FILE *fp = fopen(filename, "r");
     if (!fp) handleError("fopen");
+    
     char *line = NULL;
     size_t lineCapacity = 0;
     ssize_t linelen;
@@ -434,39 +438,85 @@ char *rowsToString(int *bufferLen) {
     int totalLen = 0;
     for (int j = 0; j < editor.numrows; j ++)
         totalLen += editor.row[j].size + 1;
-        *bufferLen = totalLen;
+    *bufferLen = totalLen;
+
     char *buf = malloc(totalLen);
     char *p = buf;
     for (int j = 0; j < editor.numrows; j++) {
         memcpy(p, editor.row[j].chars, editor.row[j].size);
         p += editor.row[j].size;
         *p = '\n';
-        p++;
+        p ++;
     }
     return buf;
 }
 void editorSave() {
-    if (editor.filename == NULL) return;
-    int len;
-    char *buf = rowsToString(&len);
-    int fd = open(editor.filename, O_RDWR | O_CREAT, 0644);
-    if (fd != -1) {
-    if (ftruncate(fd, len) != -1) {
-        if (write(fd, buf, len) == len) {
-            close(fd);
-            free(buf);
-            editor.dirty = 0;
-            setStatusMessage("%d bytes written to disk", len);
+    if (editor.filename == NULL) {
+        editor.filename = prompt("Save as: %s (ESC to cancel)");
+        if (editor.filename == NULL) {
+            setStatusMessage("Save aborted");
             return;
         }
     }
-    close(fd);
+
+    int len;
+    char *buf = rowsToString(&len);
+    
+    int fd = open(editor.filename, O_RDWR | O_CREAT, 0644);
+    if (fd != -1) {
+        if (ftruncate(fd, len) != -1) {
+            if (write(fd, buf, len) == len) {
+                close(fd);
+                free(buf);
+                editor.dirty = 0;
+                setStatusMessage("%d bytes written to disk", len);
+                return;
+            }
+        }
+        close(fd);
     }
     free(buf);
     setStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
 
 /*** input ***/
+char *prompt(char *message) {
+    size_t bufferSize = 128;
+    char *buffer = malloc(bufferSize);
+
+    size_t bufferLen = 0;
+    buffer[0] = '\0';
+
+    while (1) {
+        setStatusMessage(message, buffer);
+        refreshScreen();
+
+        int c = readKey();
+        if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACK_SPACE) {
+            if (bufferLen != 0) buffer[-- bufferLen] = '\0';
+        }
+        else if (c == '\x1b') {
+            setStatusMessage("");
+            free(buffer);
+            return NULL;
+        } 
+        else if (c == '\r') {
+            if ( bufferLen != 0) {
+                setStatusMessage("");
+                return buffer;
+            }
+            else if (!iscntrl(c) && c < 128) {
+                if ( bufferLen == bufferSize - 1) {
+                    bufferSize *= 2;
+                    buffer = realloc(buffer, bufferSize);
+                }
+                buffer[bufferLen ++] = c;
+                buffer[bufferLen] = '\0';
+            }
+        }
+    }
+}
+
 void moveCursor(int key) {
     editorRow *row = (editor.yCoord >= editor.numrows) ? NULL : &editor.row[editor.yCoord];
 
@@ -512,7 +562,7 @@ void processKey() {
             break;
         case CTRL_KEY('q'):
         if (editor.dirty && quit_times) {
-            setStatusMessage("WARNING!! This file contains unsaved changes. Press Ctrl+Q again in in order to exit,");
+            setStatusMessage("WARNING!! This file contains unsaved changes. Press Ctrl+Q again to exit");
             quit_times --;
             return;
         }
@@ -534,7 +584,7 @@ void processKey() {
         case CTRL_KEY('h'):
         case DEL_KEY:
             if ( c == DEL_KEY) moveCursor(ARROW_RIGHT);
-                editorDelChar();
+            editorDelChar();
             break;
         /*if (editor.yCoord < editor.numrows)
             editor.xCoord = editor.row[editor.yCoord].size ;
@@ -591,8 +641,8 @@ int main(int argc, char *argv[]) {
     //like entering a password
     setStatusMessage("[Ctrl+Q=quit|Ctrl+S=save]");
     while (1) {
-        processKey();
         refreshScreen();
+        processKey();
     }
     //tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTerminal);
     //turning raw mode off once we're done
