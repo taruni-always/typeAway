@@ -15,6 +15,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <fcntl.h>
+//#include <conio.h>
 
 
 /*** defining our own macros***/
@@ -82,8 +83,18 @@ int xCoordTorx(editorRow *row, int cx) {
   }
   return rx;
 }
+int rxToxCoord(editorRow *row, int rx) {
+  int currentRX = 0, x;
+    for ( x = 0; x < row->size; x ++) {
+        if (row -> chars[x] == '\t')
+            currentRX += (TAB_STOP - 1) - (currentRX % TAB_STOP);
+        currentRX ++;
+        if (currentRX > rx) return x;
+    }
+    return x;
+}
 void editorSetStatusMessage(const char *fmt, ...);
-char *prompt(char *message);
+char *prompt(char *message, void (*callback)(char *, int));
 
 /***output screen***/
  
@@ -453,7 +464,7 @@ char *rowsToString(int *bufferLen) {
 }
 void editorSave() {
     if (editor.filename == NULL) {
-        editor.filename = prompt("Save as: %s (ESC to cancel)");
+        editor.filename = prompt("Save as: %s (ESC to cancel)", NULL);
         if (editor.filename == NULL) {
             setStatusMessage("Save aborted");
             return;
@@ -480,8 +491,29 @@ void editorSave() {
     setStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
 
+/**Find**/
+
+void editorFindCallback(char *sequence, int key) {
+    if ( key == '\r' || key == '\x1b') return;
+
+    for ( int i = 0; i < editor.numrows; i++) {
+        editorRow *row = &editor.row[i];
+        char *match = strstr(row -> render, sequence);
+        if (match) {
+            editor.yCoord = i;
+            editor.xCoord = rxToxCoord(row, match - row -> render);
+            editor.rowOffset = editor.numrows;
+            break;
+        }
+    }
+}
+void editorFind() {
+    char *sequence = prompt("Search: %s (ESC to cancel)", editorFindCallback);
+    if (sequence) free(sequence);
+}
+
 /*** input ***/
-char *prompt(char *message) {
+char *prompt(char *message, void (*callback)(char *, int)) {
     size_t bufferSize = 128;
     char *buffer = malloc(bufferSize);
 
@@ -498,12 +530,14 @@ char *prompt(char *message) {
         } 
         else if (c == '\x1b') {
             setStatusMessage("");
+            if (callback) callback(buffer, c);
             free(buffer);
             return NULL;
         } 
         else if (c == '\r') {
             if ( bufferLen != 0) {
                 setStatusMessage("");
+                if (callback) callback(buffer, c);
                 return buffer;
             }
         }
@@ -515,6 +549,7 @@ char *prompt(char *message) {
             buffer[bufferLen ++] = c;
             buffer[bufferLen] = '\0';
         }
+        if (callback) callback(buffer, c);
     }
 }
 
@@ -581,6 +616,9 @@ void processKey() {
             if (editor.yCoord < editor.numrows)
                 editor.xCoord = editor.row[editor.yCoord].size;
             break;
+        case CTRL_KEY('f'):
+            editorFind();
+            break;
         case BACK_SPACE:
         case CTRL_KEY('h'):
         case DEL_KEY:
@@ -637,7 +675,7 @@ int main(int argc, char *argv[]) {
     //editorOpen();
     //enabling raw mode to process every character as they're entered
     //like entering a password
-    setStatusMessage("[Ctrl+Q = quit | Ctrl+S = save]");
+    setStatusMessage("[Ctrl+Q = quit | Ctrl+S = save | Ctrl+F = find]");
     while (1) {
         refreshScreen();
         processKey();
