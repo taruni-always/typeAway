@@ -494,13 +494,37 @@ void editorSave() {
 /**Find**/
 
 void editorFindCallback(char *sequence, int key) { //for incremental search
-    if ( key == '\r' || key == '\x1b') return;
+    static int last_match = -1;
+    static int direction = 1;
 
+    if ( key == '\r' || key == '\x1b') {
+        last_match = -1;
+        direction = 1;
+        return;
+    }
+    else if (key == ARROW_RIGHT || key == ARROW_DOWN) {
+        direction = 1;
+    }
+    else if ( key == ARROW_LEFT || key == ARROW_UP) {
+        direction = -1;
+    }
+    else {
+        last_match = -1;
+        direction = 1;
+    }
+
+
+    if (last_match == -1) direction = 1;
+    int current = last_match;
     for ( int i = 0; i < editor.numrows; i++) {
-        editorRow *row = &editor.row[i];
+        current += direction;
+        if ( current == -1) current = editor.numrows - 1;
+        else if (current == editor.numrows) current = 0;
+        editorRow *row = &editor.row[current];
         char *match = strstr(row -> render, sequence);
         if (match) {
-            editor.yCoord = i;
+            last_match = current;
+            editor.yCoord = current;
             editor.xCoord = rxToxCoord(row, match - row -> render);
             editor.rowOffset = editor.numrows;
             break;
@@ -508,8 +532,19 @@ void editorFindCallback(char *sequence, int key) { //for incremental search
     }
 }
 void editorFind() {
-    char *sequence = prompt("\x1b[32mSearch: %s (ESC to cancel)\x1b[m", editorFindCallback);
+    int saved_cx = editor.xCoord;
+    int saved_cy = editor.yCoord;
+    int saved_colOff = editor.colOffset;
+    int saved_rowOff = editor.rowOffset;
+
+    char *sequence = prompt("\x1b[32mSearch: %s (Arrows to navigate | Enter to search | ESC to cancel)\x1b[m", editorFindCallback);
     if (sequence) free(sequence);
+    else {
+        editor.xCoord = saved_cx;
+        editor.yCoord = saved_cy;
+        editor.rowOffset = saved_rowOff;
+        editor.colOffset = saved_colOff;
+    }
 }
 
 /*** input ***/
