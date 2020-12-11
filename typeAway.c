@@ -88,7 +88,8 @@ char *C_HL_keywords[] = { "switch", "if", "while", "for", "break", "continue", "
     "struct", "union", "typedef", "static", "enum", "class", "case",
     "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",
     "void|", NULL };
-char *TXT_HL_extension[] = {".txt", NULL};
+char *TEXT_HL_extension[] = {".txt", ".docx", NULL};
+char *TEXT_HL_keywords[] = {"", NULL};
 struct editorSyntax HLDB[] = { // highlight database
     {
         "c/c++", 
@@ -99,11 +100,11 @@ struct editorSyntax HLDB[] = { // highlight database
     },
     {
         "text",
-        TXT_HL_extension,
-        NULL,
+        TEXT_HL_extension,
+        TEXT_HL_keywords, 
         "note:",
         HL_HIGHLIGHT_NUMBERS
-    }
+    } 
 };
 
 #define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))
