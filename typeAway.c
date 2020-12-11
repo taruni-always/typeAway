@@ -37,6 +37,7 @@ enum keys {
 enum highlight {
     HL_NORMAL = 0,
     HL_COMMENT,
+    HL_MLCOMMENT,
     HL_KEYWORD1,
     HL_KEYWORD2,
     HL_STRING,
@@ -45,9 +46,9 @@ enum highlight {
     HL_MATCH
 };
 
-#define HL_HIGHLIGHT_NUMBERS (1<<0)
-#define HL_HIGHLIGHT_TEXT (1<<0)
-#define HL_HIGHLIGHT_STRINGS (1<<1)
+#define HL_HIGHLIGHT_NUMBERS (1 << 0)
+#define HL_HIGHLIGHT_TEXT (1 << 0)
+#define HL_HIGHLIGHT_STRINGS (1 << 1)
 
 /***Data***/
 
@@ -56,6 +57,8 @@ struct editorSyntax {
     char **fileMatch;
     char **keywords;
     char *singleLineCommentStart;
+    char *multiLineCommentsStart;
+    char *multiLineCommentsEnd;
     int flags;
 };
 typedef struct editorRow {
@@ -96,14 +99,14 @@ struct editorSyntax HLDB[] = { // highlight database
         "c/c++", 
         C_HL_extensions,
         C_HL_keywords,
-        "//",
+        "//", "/*", "*/",
         HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
     },
     {
         "text",
         TEXT_HL_extension,
         TEXT_HL_keywords, 
-        "note:",
+        "note:", "(", ")",
         HL_HIGHLIGHT_NUMBERS
     } 
 };
@@ -405,6 +408,7 @@ int isSeparator(int c) {
 }
 int colourCodes(int hl) {
     switch (hl) {
+        case HL_MLCOMMENT:
         case HL_COMMENT: return 36; //cyan
         case HL_KEYWORD1: return 33; //Brown
         case HL_KEYWORD2: return 32; // Green
@@ -423,8 +427,13 @@ void updateSyntax(editorRow *row) {
 
     char **keywords = editor.syntax -> keywords;
 
-    char *scs = editor.syntax -> singleLineCommentStart;
-    int scsLen = scs ? strlen(scs) : 0;
+    char *scStart = editor.syntax -> singleLineCommentStart;
+    char *mcStart = editor.syntax -> multiLineCommentsStart;
+    char *mcEnd = editor.syntax -> multiLineCommentsEnd;
+
+    int scStartLen = scStart ? strlen(scStart) : 0;
+    int mcStartLen = mcStart ? strlen(mcStart) : 0;
+    int mcEndLen = mcEnd ? strlen(mcEnd) : 0;
 
     int prevSeperator = 1;
     int inString = 0;
@@ -434,8 +443,8 @@ void updateSyntax(editorRow *row) {
         char c = row -> render[i];
         char prevhl = (1 > 0) ? row -> hl[i - 1] : HL_NORMAL;
         
-        if (scsLen && !inString) {
-            if (!strncmp(&row->render[i], scs, scsLen)) {
+        if (scStartLen && !inString) {
+            if (!strncmp(&row->render[i], scStart, scStartLen)) {
                 memset(&row->hl[i], HL_COMMENT, row->rsize - i);
                 break;
             }
