@@ -41,6 +41,7 @@ enum highlight {
     HL_KEYWORD2,
     HL_STRING,
     HL_NUMBER,
+    HL_TEXT,
     HL_MATCH
 };
 
@@ -200,7 +201,18 @@ void indicateRows(struct abuf *ab) {
             char *hl = &editor.row[fileRow].hl[editor.colOffset];
             int currentColour = -1;
             for (int j = 0; j < len; j++) {
-                if (hl[j] == HL_NORMAL) {
+                if (iscntrl(c[j])) {
+                    char sym = (c[j] <= 26) ? '@' + c[j] : '?';
+                    abAppend(ab, "\x1b[7m", 4);
+                    abAppend(ab, &sym, 1);
+                    abAppend(ab, "\x1b[m", 3);
+                    if (currentColour != -1) {
+                        char buf[16];
+                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", currentColour);
+                        abAppend(ab, buf, clen);
+                    }
+                }
+                else  if (hl[j] == HL_NORMAL) {
                     if (currentColour != -1) {
                         abAppend(ab, "\x1b[39m", 5);
                         currentColour = -1;
@@ -397,6 +409,7 @@ int colourCodes(int hl) {
         case HL_KEYWORD1: return 33; //Brown
         case HL_KEYWORD2: return 32; // Green
         case HL_NUMBER: return 31; //red
+        case HL_TEXT: return 33;
         case HL_MATCH: return 32; //green // when we found the search results
         case HL_STRING: return 34; //Blue
         default: return 37;
@@ -459,7 +472,9 @@ void updateSyntax(editorRow *row) {
                 continue;
             }
         }
-
+        if (editor.syntax -> flags & HL_HIGHLIGHT_TEXT) {
+            row -> hl[i] = HL_TEXT;
+        }
         if (prevSeperator) {
             int j;
             for ( j = 0; keywords[j]; j++) {
