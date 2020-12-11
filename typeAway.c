@@ -34,11 +34,16 @@ enum keys {
     PAGE_UP,
     PAGE_DOWN
 };
-
+enum highlight {
+    HL_NORMAL = 0,
+    HL_NUMBER,
+    HL_MATCH
+};
 typedef struct editorRow {
   int size, rsize;
   char *chars;
   char *render;
+  char *hl; //highlighting
 } editorRow;
 
 /*** global variables ***/
@@ -95,6 +100,7 @@ int rxToxCoord(editorRow *row, int rx) {
 }
 void editorSetStatusMessage(const char *fmt, ...);
 char *prompt(char *message, void (*callback)(char *, int));
+int colourCodes(int hl);
 
 /***output screen***/
  
@@ -142,7 +148,29 @@ void indicateRows(struct abuf *ab) {
             int len = editor.row[fileRow].rsize - editor.colOffset;
             if (len < 0) len = 0;
             if (len > editor.terminalCols) len = editor.terminalCols;
-            abAppend(ab, &editor.row[fileRow].render[editor.colOffset], len);
+            char *c = &editor.row[fileRow].render[editor.colOffset];
+            char *hl = &editor.row[fileRow].hl[editor.colOffset];
+            int currentColour = -1;
+            for (int j = 0; j < len; j++) {
+                if (hl[j] == HL_NORMAL) {
+                    if (currentColour != -1) {
+                        abAppend(ab, "\x1b[39m", 5);
+                        currentColour = -1;
+                    }
+                    abAppend(ab, &c[j], 1);
+                } 
+                else {
+                    int color = colourCodes(hl[j]);
+                    if (color != currentColour) {
+                        currentColour = color;
+                        char buf[16];
+                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+                        abAppend(ab, buf, clen);
+                    }
+                    abAppend(ab, &c[j], 1);
+                }   
+            }
+            abAppend(ab, "\x1b[39m", 5);  
         }
         abAppend(ab, "\x1b[K", 3);
         abAppend(ab, "\r\n", 2);
@@ -311,6 +339,40 @@ int getWindowSize(int *rSize, int *cSize) {
     }
 }
 
+/*** syntax highlighting ***/
+int isSeparator(int c) {
+    return isspace(c) || c == '\0' || strchr(",.()+-/*=~%<>[];", c) != NULL;
+}
+int colourCodes(int hl) {
+    switch (hl) {
+        case HL_NUMBER: return 31; //red
+        case HL_MATCH: return 32; //green // when we found the search results
+        default: return 37;
+    }
+}
+void updateSyntax(editorRow *row) {
+    row -> hl = realloc(row -> hl, row -> rsize);
+    memset(row -> hl, HL_NORMAL, row -> rsize);
+
+    int prevSeperator = 1; 
+
+    int i = 0;
+    while (i < row->rsize) {
+        char c = row -> render[i];
+        char prevhl = (1 > 0) ? row -> hl[i - 1] : HL_NORMAL;
+
+        if ( (isdigit(c) && (prevSeperator || prevhl == HL_NUMBER)) || (c == '.' && prevhl == HL_NUMBER)) { //decimal numbers also
+            row -> hl[i] = HL_NUMBER;
+            i ++;
+            prevSeperator = 0;
+            continue;
+        }
+
+        prevSeperator = isSeparator(c);
+        i ++;
+    }
+}
+
 /***manipulating row actions***/
 void updateRow(editorRow *row) {
     free(row->render);
@@ -333,6 +395,7 @@ void updateRow(editorRow *row) {
     }
     row -> render[index] = '\0';
     row -> rsize = index;
+    updateSyntax(row);
 }
 void insertRow(int insertAt, char *s, size_t len) {
     if ( insertAt < 0 || insertAt > editor.numrows) return; 
@@ -347,6 +410,7 @@ void insertRow(int insertAt, char *s, size_t len) {
 
     editor.row[insertAt].rsize = 0;
     editor.row[insertAt].render = NULL;
+    editor.row[insertAt].hl = NULL;
     updateRow(&editor.row[insertAt]);
     editor.numrows ++;
     editor.dirty ++;
@@ -354,6 +418,7 @@ void insertRow(int insertAt, char *s, size_t len) {
 void freeRow(editorRow *row) {
     free(row -> render);
     free(row -> chars);
+    free(row -> hl);
 }
 void delRow(int at) {
     if (at < 0 || at >= editor.numrows) return;
@@ -497,6 +562,13 @@ void editorFindCallback(char *sequence, int key) { //for incremental search
     static int last_match = -1;
     static int direction = 1;
 
+    static int saved_hl_line;
+    static char *saved_hl = NULL;
+    if (saved_hl) {
+        memcpy(editor.row[saved_hl_line].hl, saved_hl, editor.row[saved_hl_line].rsize);
+        free(saved_hl);
+        saved_hl = NULL;
+    }
     if ( key == '\r' || key == '\x1b') {
         last_match = -1;
         direction = 1;
@@ -516,10 +588,12 @@ void editorFindCallback(char *sequence, int key) { //for incremental search
 
     if (last_match == -1) direction = 1;
     int current = last_match;
+
     for ( int i = 0; i < editor.numrows; i++) {
         current += direction;
         if ( current == -1) current = editor.numrows - 1;
         else if (current == editor.numrows) current = 0;
+
         editorRow *row = &editor.row[current];
         char *match = strstr(row -> render, sequence);
         if (match) {
@@ -527,6 +601,11 @@ void editorFindCallback(char *sequence, int key) { //for incremental search
             editor.yCoord = current;
             editor.xCoord = rxToxCoord(row, match - row -> render);
             editor.rowOffset = editor.numrows;
+
+            saved_hl_line = current;
+            saved_hl = malloc(row -> rsize);
+            memcpy(saved_hl, row -> hl, row -> rsize);
+            memset(&row -> hl[match - row -> render], HL_MATCH, strlen(sequence));
             break;
         }
     }
