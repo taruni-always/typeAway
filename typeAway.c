@@ -62,10 +62,12 @@ struct editorSyntax {
     int flags;
 };
 typedef struct editorRow {
-  int size, rsize;
-  char *chars;
-  char *render;
-  char *hl; //highlighting
+    int index;
+    int size, rsize;
+    char *chars;
+    char *render;
+    char *hl; //highlighting
+    int hlOpenComment;
 } editorRow;
 
 /*** global variables ***/
@@ -437,16 +439,40 @@ void updateSyntax(editorRow *row) {
 
     int prevSeperator = 1;
     int inString = 0;
+    int inComment = (row -> index > 0 && editor.row[row -> index - 1].hlOpenComment);
 
     int i = 0;
     while (i < row->rsize) {
         char c = row -> render[i];
         char prevhl = (1 > 0) ? row -> hl[i - 1] : HL_NORMAL;
         
-        if (scStartLen && !inString) {
+        if (scStartLen && !inString && !inComment) {
             if (!strncmp(&row->render[i], scStart, scStartLen)) {
                 memset(&row->hl[i], HL_COMMENT, row->rsize - i);
                 break;
+            }
+        }
+
+        if (mcStartLen && mcEndLen && !inString) {
+            if (inComment) {
+                row -> hl[i] = HL_MLCOMMENT;
+                if (!strncmp(&row -> render[i], mcEnd, mcEndLen)) {
+                    memset(&row -> hl[i], HL_MLCOMMENT, mcEndLen);
+                    i += mcEndLen;
+                    inComment = 0;
+                    prevSeperator = 1;
+                    continue;
+                } 
+                else {
+                    i ++;
+                    continue;
+                }
+            } 
+            else if (!strncmp(&row -> render[i], mcStart, mcStartLen)) {
+                memset(&row ->hl[i], HL_MLCOMMENT, mcStartLen);
+                i += mcStartLen;
+                inComment = 1;
+                continue;
             }
         }
 
@@ -505,6 +531,11 @@ void updateSyntax(editorRow *row) {
         prevSeperator = isSeparator(c);
         i ++;
     }
+    
+    int changed = (row -> hlOpenComment != inComment);
+    row -> hlOpenComment = inComment;
+    if (changed && row -> index + 1 < editor.numrows)
+        updateSyntax(&editor.row[row -> index + 1]);
 }
 void selectSyntaxHighlight() {
     editor.syntax = NULL;
@@ -560,7 +591,10 @@ void insertRow(int insertAt, char *s, size_t len) {
     
     editor.row = realloc(editor.row, sizeof(editorRow) * (editor.numrows + 1));
     memmove(&editor.row[insertAt + 1], &editor.row[insertAt], sizeof(editorRow) * (editor.numrows - insertAt));
-        
+    for (int j = insertAt + 1; j <= editor.numrows; j ++) editor.row[j].index ++;
+    
+    editor.row[insertAt].index = insertAt;
+
     editor.row[insertAt].size = len;
     editor.row[insertAt].chars = malloc(len + 1);
     memcpy(editor.row[insertAt].chars, s, len);
@@ -569,6 +603,7 @@ void insertRow(int insertAt, char *s, size_t len) {
     editor.row[insertAt].rsize = 0;
     editor.row[insertAt].render = NULL;
     editor.row[insertAt].hl = NULL;
+    editor.row[insertAt].hlOpenComment = 0;
     updateRow(&editor.row[insertAt]);
     editor.numrows ++;
     editor.dirty ++;
@@ -582,6 +617,7 @@ void delRow(int at) {
     if (at < 0 || at >= editor.numrows) return;
     freeRow(&editor.row[at]);
     memmove(&editor.row[at], &editor.row[at + 1], sizeof(editorRow) * (editor.numrows - at - 1));
+    for (int j = at + 1; j <= editor.numrows; j ++) editor.row[j].index ++;
     editor.numrows --;
     editor.dirty ++;
 }
