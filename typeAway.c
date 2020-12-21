@@ -15,8 +15,8 @@
 #include <time.h>
 #include <stdarg.h>
 #include <fcntl.h>
-//#include <conio.h>
 
+//#include "search.h"
 
 /*** defining our own macros***/
 #define CTRL_KEY(key) ((key) & 0x1f) // ANDing with 31 i.e 1f in hexadecimal ex: 'a' - 97, 'a' & 0x1f - 1 
@@ -108,7 +108,7 @@ struct editorSyntax HLDB[] = { // highlight database
         "text",
         TEXT_HL_extension,
         TEXT_HL_keywords, 
-        "note:", "(", ")",
+        "note:", "", "",
         HL_HIGHLIGHT_NUMBERS
     } 
 };
@@ -325,6 +325,7 @@ void enableRawMode() {
     raw.c_cc[VTIME] = 1;
     if ( tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1 ) handleError("tcsetattr");
 } // function to enable raw mode
+
 int readKey() {
     int nread;
     char c;

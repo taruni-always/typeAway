@@ -6,6 +6,6 @@ int main() {
 	return 0;
 	
 	//comments
-	/*mult
-ilinejjj jjj comments her testing if they work*/
+	/*multiline comments here
+	testing if they work*/
 }
