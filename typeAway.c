@@ -244,8 +244,11 @@ void indicateRows(struct abuf *ab) {
 void drawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4);
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "\x1b[35m %.20s - %d lines %s\x1b[m", editor.fileName ? editor.fileName : "[Unknown File]", editor.numrows, editor.dirty ? "(modified)" : "");
-    int rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d/%d", editor.syntax ? editor.syntax -> fileType : "no file type", editor.yCoord + 1, editor.numrows);    if (len > editor.terminalCols) len = editor.terminalCols;
+    int len = snprintf(status, sizeof(status), "\x1b[35m %.20s - %d lines %s\x1b[m", editor.fileName ? 
+                    editor.fileName : "[Unknown File]", editor.numrows, editor.dirty ? "(modified)" : "");
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d/%d", editor.syntax ? 
+                    editor.syntax -> fileType : "no file type", editor.yCoord + 1, editor.numrows);    
+    if (len > editor.terminalCols) len = editor.terminalCols;
     if (len > editor.terminalCols) len = editor.terminalCols;
     abAppend(ab, status, len);
     while (len < editor.terminalCols) {
